@@ -246,6 +246,126 @@ function jira {
     return 0
   fi
 
+######################################
+# trying to add the rel functionality
+######################################
+  if [[ $COMMAND == "rel" ]] ; then
+    REL="$2"
+
+    if [[ -z $REL ]]; then
+      echo >&2
+      echo "  Usage: jira rel [rel_ticket] " >&2
+      return 1
+    fi
+
+    JQL="issue in linkedIssues($REL) AND (project in (AH, CLOUDID, EVI, IDMCP, IDMSP, IDMSI) OR component in (IDM) OR labels in (IDM)) ORDER BY key, status"
+
+	JQ_QUERY='.issues[]|"\(.id)"'
+
+	CURL=$(curl --location --silent --request POST --header "Authorization: Basic ${JIRA_AUTH}" --header "Content-Type: application/json" ${JIRA_DOMAIN}/rest/api/2/search -d '{"jql":"'"${JQL}"'", "maxResults":15}')
+
+    if [[ ! $? -eq 0 ]]; then
+      echo "Curling [${JIRA_DOMAIN}/rest/api/2/search] has failed; stopping." >&2
+      return 1
+    fi
+
+    ids=$(jq -r ${JQ_QUERY} <<< $CURL)
+	linked_Issues=$(jq -r '{linked_issues: [.issues[] | {id: .id, key: .key, summary: .fields.summary, link: ("https://jira.corp.synacor.com/browse/" + .key)}]}' <<< $CURL)
+	all_repos="{\"repos\":[]}"
+
+    if [[ ! $? -eq 0 ]]; then
+      echo "Parsing the result of curling [${JIRA_DOMAIN}/rest/api/2/search] with jq query [${JQ_QUERY}] has failed; stopping." >&2
+      return 1
+    fi
+
+	# while read -r id
+	# do
+	#   echo "id is: $id"
+	#   CURL=$(curl --location --silent --request GET --header "Authorization: Basic ${JIRA_AUTH}" --header "Content-Type: application/json" "${JIRA_DOMAIN}/rest/dev-status/1.0/issue/detail?issueId=${id}&applicationType=stash&dataType=pullrequest")
+	#
+	#   if [[ ! $? -eq 0 ]]; then
+    #     echo "Curling [${JIRA_DOMAIN}/rest/api/2/search] has failed; stopping." >&2
+    #     return 1
+    #   fi
+	#
+    #   repos_to_print=$(jq -r '.detail[].branches[]|"\(.repository.name)"' <<< $CURL)
+	#   repos=$(jq -c '[.detail[].branches[].repository.name]' <<< $CURL)
+	#   repo_add_query=".repos += $repos"
+	#   all_repos=$(jq -r ${repo_add_query} <<< $all_repos)
+	#   echo -e "$repos_to_print"
+	#   #echo -e "$repos"
+	#   echo -e "$all_repos"
+	#
+	# done <<<"$ids"
+
+	for row in $(echo "${linked_Issues}" | jq -r '.linked_issues[] | @base64'); do
+		_jq() {
+			echo ${row} | base64 --decode | jq -r ${1}
+		}
+
+		id=$(_jq '.id')
+		echo -e "id: $id"
+
+		key=$(_jq '.key')
+		echo -e "key: $key"
+
+		summary=$(_jq '.summary')
+		echo -e "summary: $summary"
+
+		link=$(_jq '.link')
+		echo -e "link: $link"
+
+		CURL=$(curl --location --silent --request GET --header "Authorization: Basic ${JIRA_AUTH}" --header "Content-Type: application/json" "${JIRA_DOMAIN}/rest/dev-status/1.0/issue/detail?issueId=${id}&applicationType=stash&dataType=pullrequest")
+
+		if [[ ! $? -eq 0 ]]; then
+			echo "Curling [${JIRA_DOMAIN}/rest/api/2/search] has failed; stopping." >&2
+			return 1
+		fi
+
+		repos_to_print=$(jq -r '.detail[].pullRequests[]|"\(.destination.repository.name)"' <<< $CURL)
+		repos=$(jq -c '[.detail[].pullRequests[].destination.repository.name]' <<< $CURL)
+		repo_add_query=".repos += $repos"
+		all_repos=$(jq -r ${repo_add_query} <<< $all_repos)
+		echo -e "$repos_to_print"
+		#echo -e "$repos"
+		echo -e "$all_repos"
+	done
+    # echo -e "$ids"
+	# echo -e "$linked_Issues"
+    return 0
+  fi
+
+
+  if [[ $COMMAND == "repos" ]] ; then
+    REL="$2"
+
+    if [[ -z $REL ]]; then
+      echo >&2
+      echo "  Usage: jira repos [ticket] " >&2
+      return 1
+    fi
+
+    JQ_QUERY='.detail[].branches[]|"\(.repository.name)"'
+
+    CURL=$(curl --location --silent --request GET --header "Authorization: Basic ${JIRA_AUTH}" --header "Content-Type: application/json" "${JIRA_DOMAIN}/rest/dev-status/1.0/issue/detail?issueId=${REL}&applicationType=stash&dataType=pullrequest")
+
+    if [[ ! $? -eq 0 ]]; then
+      echo "Curling [${JIRA_DOMAIN}/rest/api/2/search] has failed; stopping." >&2
+      return 1
+    fi
+
+    JQ=$(jq -r ${JQ_QUERY} <<< $CURL)
+
+    if [[ ! $? -eq 0 ]]; then
+      echo "Parsing the result of curling [${JIRA_DOMAIN}/rest/api/2/search] with jq query [${JQ_QUERY}] has failed; stopping." >&2
+      return 1
+    fi
+
+    echo -e "$JQ"
+    return 0
+  fi
+
+
   I=0
   while read -r LINE
   do
